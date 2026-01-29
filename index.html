@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Amiral Battı Online - Lobby</title>
+    <title>Amiral Battı Online - Kaptan Köşkü</title>
     <style>
         :root { --bg: #0f172a; --p1: #3b82f6; --p2: #a855f7; --danger: #ef4444; --success: #22c55e; --dark: #1e293b; --text: #f8fafc; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
@@ -23,13 +23,15 @@
         #status-bar { background: var(--p1); color: white; padding: 12px 25px; border-radius: 30px; margin: 10px 0; font-weight: bold; text-align: center; width: fit-content; }
         .board { display: grid; grid-template-columns: repeat(10, 8.5vw); grid-template-rows: repeat(10, 8.5vw); border: 2px solid #334155; background: #1e293b; margin: 10px auto; }
         @media (min-width: 500px) { .board { grid-template-columns: repeat(10, 32px); grid-template-rows: repeat(10, 32px); } }
-        .cell { border: 1px solid #334155; display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; }
-        .ship { background-color: #64748b; }
-        .hit { background-color: var(--danger) !important; }
+        .cell { border: 1px solid #334155; display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; cursor: pointer; }
+        .ship { background-color: #64748b; border-radius: 2px; }
+        .hit { background-color: var(--danger) !important; color: white; font-weight: bold; }
         .miss { background-color: #475569 !important; opacity: 0.5; }
         .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; max-width: 360px; margin: 10px 0; }
-        button { padding: 15px; cursor: pointer; border: none; color: white; border-radius: 8px; font-weight: bold; }
+        button { padding: 15px; cursor: pointer; border: none; color: white; border-radius: 8px; font-weight: bold; transition: 0.3s; }
+        button:disabled { background: #475569 !important; cursor: not-allowed; opacity: 0.5; }
         .hidden { display: none !important; }
+        h4 { margin-top: 10px; font-size: 0.9rem; letter-spacing: 1px; color: var(--p1); }
     </style>
 </head>
 <body>
@@ -37,7 +39,7 @@
     <div id="mode-selection">
         <div class="welcome-box">
             <h1>⚓ HOŞ GELDİN <span style="color:var(--p1)">KAPTAN!</span></h1>
-            <p>İsmini yaz ve bir filoya katıl veya kendi odanı kur.</p>
+            <p>Filonu hazırla ve denizlerin hakimi ol.</p>
         </div>
         <div class="input-group">
             <input type="text" id="p-name" placeholder="Kaptan Adı">
@@ -45,28 +47,34 @@
             <button style="background:var(--p1)" onclick="game.initOnline('host')">YENİ SAVAŞ BAŞLAT</button>
         </div>
         <div class="lobby-container">
-            <h4 style="margin-bottom:10px;">Aktif Cepheler</h4>
+            <h4 style="margin-bottom:10px; color:white;">Aktif Cepheler</h4>
             <div id="room-list"><p>Odalar aranıyor...</p></div>
         </div>
     </div>
 
     <div id="status-bar" class="hidden">Bağlanılıyor...</div>
+
     <div id="setup-ui" class="controls hidden">
         <button style="background:#f39c12" onclick="game.toggleDir()">Yön: <span id="dir-txt">Yatay</span></button>
         <button style="background:var(--p2)" onclick="game.autoPlace()">Rastgele Diz</button>
-        <button id="ready-btn" disabled style="background:var(--success); grid-column: span 2" onclick="game.setReady()">DONANMA HAZIR!</button>
+        <button id="ready-btn" disabled style="background:var(--success); grid-column: span 2" onclick="game.setReady()">DONANMAYI DENİZE İNDİR!</button>
     </div>
 
     <div id="game-area" class="hidden">
-        <div id="area-target"><h4>HEDEF DENİZ</h4><div id="board-target" class="board"></div></div>
-        <div id="area-my"><h4>KENDİ DONANMAN</h4><div id="board-my" class="board"></div></div>
+        <div id="area-target">
+            <h4>HEDEF DENİZ (DÜŞMAN)</h4>
+            <div id="board-target" class="board"></div>
+        </div>
+        <div id="area-my">
+            <h4>KENDİ DONANMAN</h4>
+            <div id="board-my" class="board"></div>
+        </div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, updateDoc, onSnapshot, collection, query, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, updateDoc, onSnapshot, collection, query, where, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-        // URL Kısıtlaması yaptığın için anahtarı buraya güvenle koyabiliriz.
         const firebaseConfig = {
             apiKey: "AIzaSyB871gGPBGxxeglNqlp4aIJy24M5DvGcLM",
             authDomain: "amiralbatti-e55fe.firebaseapp.com",
@@ -84,20 +92,27 @@
                 this.myBoard = Array.from({length:10}, () => Array(10).fill(0));
                 this.myShots = Array.from({length:10}, () => Array(10).fill(0));
                 this.ships = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1];
-                this.isVertical = false; this.role = null; this.roomName = null;
-                this.gameStarted = false; this.lastShotId = null; this.enemyBoard = null;
+                this.placedShipsCount = 0;
+                this.isVertical = false; 
+                this.role = null; 
+                this.roomName = null;
+                this.gameStarted = false; 
+                this.lastShotId = null; 
+                this.enemyBoard = null;
                 this.listenLobby();
             }
 
             listenLobby() {
+                const oneHourAgo = Date.now() - (60 * 60 * 1000);
                 const q = query(collection(db, "maclar"), where("p2_ready", "==", false));
                 onSnapshot(q, (snapshot) => {
                     const listEl = document.getElementById('room-list');
                     listEl.innerHTML = '';
-                    if (snapshot.empty) listEl.innerHTML = '<p style="font-size:0.8rem; opacity:0.6;">Aktif oda bulunamadı.</p>';
+                    let count = 0;
                     snapshot.forEach((d) => {
                         const data = d.data();
-                        if(data.winner) return;
+                        if(data.winner || (data.createdAt && data.createdAt < oneHourAgo)) return;
+                        count++;
                         const item = document.createElement('div');
                         item.className = 'room-item';
                         item.innerHTML = `
@@ -106,6 +121,7 @@
                         `;
                         listEl.appendChild(item);
                     });
+                    if (count === 0) listEl.innerHTML = '<p style="font-size:0.8rem; opacity:0.6;">Aktif cephe bulunamadı.</p>';
                 });
             }
 
@@ -113,49 +129,51 @@
                 const name = document.getElementById('p-name').value.trim();
                 const room = selectedRoom || document.getElementById('room-id').value.trim();
                 if(!name || !room) return alert("İsim ve Oda seçiniz!");
-                this.roomName = room; this.myName = name;
+                
+                this.roomName = room; 
+                this.myName = name;
                 document.getElementById('mode-selection').classList.add('hidden');
                 document.getElementById('status-bar').classList.remove('hidden');
                 document.getElementById('setup-ui').classList.remove('hidden');
+                
+                this.renderSetup(); // Manuel dizilim için tahtayı hazırla
+
                 const docRef = doc(db, "maclar", room);
-                if(type === 'host') {
-                    this.role = 'p1';
-                    await setDoc(docRef, { p1_name: name, p1_ready: false, p2_name: "", p2_ready: false, turn: 'p1', lastShot: null, winner: null });
-                } else {
-                    this.role = 'p2';
-                    await updateDoc(docRef, { p2_name: name });
+                try {
+                    if(type === 'host') {
+                        this.role = 'p1';
+                        await setDoc(docRef, { 
+                            p1_name: name, p1_ready: false, p2_name: "", p2_ready: false, 
+                            turn: 'p1', lastShot: null, winner: null, createdAt: Date.now() 
+                        });
+                    } else {
+                        this.role = 'p2';
+                        await updateDoc(docRef, { p2_name: name });
+                    }
+                    this.listenRoom();
+                } catch (e) {
+                    alert("Bağlantı hatası! Lütfen AdBlock'u kapatın.");
+                    location.reload();
                 }
-                this.listenRoom();
             }
 
-            listenRoom() {
-                onSnapshot(doc(db, "maclar", this.roomName), (snap) => {
-                    const data = snap.data();
-                    if(!data) return;
-                    this.isMyTurn = (data.turn === this.role);
-                    const rawEnemyBoard = (this.role === 'p1' ? data.p2_board : data.p1_board);
-                    if(rawEnemyBoard) this.enemyBoard = JSON.parse(rawEnemyBoard);
-                    if(data.lastShot && data.lastShot.id !== this.lastShotId) {
-                        this.lastShotId = data.lastShot.id;
-                        if(data.lastShot.by !== this.role) this.handleEnemyShot(data.lastShot);
+            // --- MANUEL DİZİLİM MANTIĞI ---
+            placeShipManual(r, c) {
+                if(this.gameStarted || this.placedShipsCount >= this.ships.length) return;
+                
+                const len = this.ships[this.placedShipsCount];
+                if(this.canPlace(r, c, len, this.isVertical)) {
+                    for(let i=0; i<len; i++) {
+                        let nr = this.isVertical ? r+i : r;
+                        let nc = this.isVertical ? c : c+i;
+                        this.myBoard[nr][nc] = 1;
                     }
-                    if(data.p1_ready && data.p2_ready && !this.gameStarted) {
-                        this.gameStarted = true;
-                        document.getElementById('setup-ui').classList.add('hidden');
-                        document.getElementById('game-area').classList.remove('hidden');
-                        this.renderBoards();
-                    }
-                    const status = document.getElementById('status-bar');
-                    if(!this.gameStarted) status.innerText = "Düşman Bekleniyor...";
-                    else {
-                        status.innerText = this.isMyTurn ? "ATEŞ SIRASI SENDE! 🎯" : "DÜŞMAN NİŞAN ALIYOR...";
-                        status.style.background = this.isMyTurn ? "var(--success)" : "var(--danger)";
-                    }
-                    if(data.winner) { alert("SAVAŞ BİTTİ! KAZANAN: " + data.winner); location.reload(); }
-                });
+                    this.placedShipsCount++;
+                    this.renderSetup();
+                    if(this.placedShipsCount === this.ships.length) document.getElementById('ready-btn').disabled = false;
+                }
             }
 
-            toggleDir() { this.isVertical = !this.isVertical; document.getElementById('dir-txt').innerText = this.isVertical ? "Dikey" : "Yatay"; }
             autoPlace() {
                 this.myBoard = Array.from({length:10}, () => Array(10).fill(0));
                 this.ships.forEach(len => {
@@ -168,9 +186,11 @@
                         }
                     }
                 });
+                this.placedShipsCount = this.ships.length;
                 document.getElementById('ready-btn').disabled = false;
                 this.renderSetup();
             }
+
             canPlace(r, c, l, v) {
                 for(let i=0; i<l; i++) {
                     let nr = v ? r+i : r, nc = v ? c : c+i;
@@ -183,18 +203,56 @@
                 }
                 return true;
             }
+
             renderSetup() {
-                const board = document.getElementById('board-my'); board.innerHTML = '';
+                const board = document.getElementById('board-my'); 
+                board.innerHTML = '';
                 document.getElementById('game-area').classList.remove('hidden');
                 document.getElementById('area-target').classList.add('hidden');
                 for(let r=0; r<10; r++) {
                     for(let c=0; c<10; c++) {
                         const cell = document.createElement('div');
                         cell.className = 'cell' + (this.myBoard[r][c] ? ' ship' : '');
+                        cell.onclick = () => this.placeShipManual(r, c);
                         board.appendChild(cell);
                     }
                 }
             }
+
+            // --- OYUN İÇİ MANTIK ---
+            listenRoom() {
+                onSnapshot(doc(db, "maclar", this.roomName), (snap) => {
+                    const data = snap.data();
+                    if(!data) return;
+                    this.isMyTurn = (data.turn === this.role);
+                    const rawEnemy = (this.role === 'p1' ? data.p2_board : data.p1_board);
+                    if(rawEnemy) this.enemyBoard = JSON.parse(rawEnemy);
+                    
+                    if(data.lastShot && data.lastShot.id !== this.lastShotId) {
+                        this.lastShotId = data.lastShot.id;
+                        if(data.lastShot.by !== this.role) this.handleEnemyShot(data.lastShot);
+                    }
+                    
+                    if(data.p1_ready && data.p2_ready && !this.gameStarted) {
+                        this.gameStarted = true;
+                        document.getElementById('setup-ui').classList.add('hidden');
+                        document.getElementById('game-area').classList.remove('hidden');
+                        this.renderBoards();
+                    }
+                    
+                    const status = document.getElementById('status-bar');
+                    if(!this.gameStarted) status.innerText = "Donanma Hazırlanıyor...";
+                    else {
+                        status.innerText = this.isMyTurn ? "ATEŞ SIRASI SENDE! 🎯" : "DÜŞMAN ATEŞ EDİYOR...";
+                        status.style.background = this.isMyTurn ? "var(--success)" : "var(--danger)";
+                    }
+                    if(data.winner) {
+                        alert("SAVAŞ BİTTİ! KAZANAN: " + data.winner);
+                        location.reload();
+                    }
+                });
+            }
+
             async setReady() {
                 const update = {};
                 update[this.role + '_ready'] = true;
@@ -203,11 +261,13 @@
                 document.getElementById('ready-btn').disabled = true;
                 document.getElementById('ready-btn').innerText = "BEKLENİYOR...";
             }
+
             renderBoards() {
                 this.drawBoard('board-my', this.myBoard, false);
                 this.drawBoard('board-target', this.myShots, true);
                 document.getElementById('area-target').classList.remove('hidden');
             }
+
             drawBoard(id, data, isTarget) {
                 const el = document.getElementById(id); el.innerHTML = '';
                 for(let r=0; r<10; r++) {
@@ -227,29 +287,36 @@
                     }
                 }
             }
+
             async fire(r, c) {
                 if(!this.isMyTurn || this.myShots[r][c] !== 0 || !this.enemyBoard) return;
-                const isHit = this.enemyBoard[r][c] === 1;
-                this.myShots[r][c] = isHit ? 2 : 1;
+                const hit = this.enemyBoard[r][c] === 1;
+                this.myShots[r][c] = hit ? 2 : 1;
                 this.renderBoards();
-                const nextTurn = isHit ? this.role : (this.role === 'p1' ? 'p2' : 'p1');
-                const shotId = Date.now().toString();
-                this.lastShotId = shotId;
+                const next = hit ? this.role : (this.role === 'p1' ? 'p2' : 'p1');
+                const sId = Date.now().toString();
+                this.lastShotId = sId;
                 await updateDoc(doc(db, "maclar", this.roomName), {
-                    lastShot: { r, c, by: this.role, id: shotId },
-                    turn: nextTurn
+                    lastShot: { r, c, by: this.role, id: sId },
+                    turn: next
                 });
                 this.checkWin();
             }
+
             handleEnemyShot(shot) {
-                const {r, c} = shot;
-                const hit = this.myBoard[r][c] === 1;
-                this.myBoard[r][c] = hit ? 3 : 4; 
+                const hit = this.myBoard[shot.r][shot.c] === 1;
+                this.myBoard[shot.r][shot.c] = hit ? 3 : 4; 
                 this.renderBoards();
             }
+
             checkWin() {
                 const hits = this.myShots.flat().filter(x => x === 2).length;
                 if(hits === 20) updateDoc(doc(db, "maclar", this.roomName), { winner: this.myName });
+            }
+
+            toggleDir() { 
+                this.isVertical = !this.isVertical; 
+                document.getElementById('dir-txt').innerText = this.isVertical ? "Dikey" : "Yatay"; 
             }
         }
         window.game = new BattleshipOnline();
